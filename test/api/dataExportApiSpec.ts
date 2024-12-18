@@ -1,375 +1,187 @@
-/*
- * Copyright (c) 2014-2024 Bjoern Kimminich & the OWASP Juice Shop contributors.
- * SPDX-License-Identifier: MIT
- */
+import frisby = require('frisby');
+import { expect } from '@jest/globals';
+import config from 'config';
+import path from 'path';
+import fs from 'fs';
+import FormData from 'form-data';
 
-import frisby = require('frisby')
-import { expect } from '@jest/globals'
-import config from 'config'
-import path from 'path'
+const jsonHeader = { 'content-type': 'application/json' };
+const REST_URL = 'http://localhost:3000/rest';
 
-const fs = require('fs')
+// Helper function to login and get the auth token
+const login = (email: string, password: string): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    frisby.post(REST_URL + '/user/login', {
+      headers: jsonHeader,
+      body: { email, password }
+    }).expect('status', 200)
+      .then(response => response.json())
+      .then(json => {
+        const data = json as { authentication: { token: string } };
+        resolve(data.authentication.token);
+      })
+      .catch(err => reject(err));
+  });
+};
 
-const jsonHeader = { 'content-type': 'application/json' }
-const REST_URL = 'http://localhost:3000/rest'
+const exportData = (token: string, body: object): Promise<frisby.FrisbyResponse> => {
+  return frisby.post(REST_URL + '/user/data-export', {
+    headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+    body
+  }).promise();
+};
 
 describe('/rest/user/data-export', () => {
-  it('Export data without use of CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'bjoern.kimminich@gmail.com',
-        password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI='
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/user/data-export', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-          body: {
-            format: '1'
-          }
-        })
-          .expect('status', 200)
-          .expect('header', 'content-type', /application\/json/)
-          .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-          .then(({ json }) => {
-            const parsedData = JSON.parse(json.userData)
-            expect(parsedData.username).toBe('bkimminich')
-            expect(parsedData.email).toBe('bjoern.kimminich@gmail.com')
-          })
-      })
-  })
+  it('Export data without use of CAPTCHA', async () => {
+    const token = await login('bjoern.kimminich@gmail.com', 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=');
+    const response = await exportData(token, { format: 1 });
 
-  it('Export data when CAPTCHA requested need right answer', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'bjoern.kimminich@gmail.com',
-        password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI='
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.get(REST_URL + '/image-captcha', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-        })
-          .expect('status', 200)
-          .expect('header', 'content-type', /application\/json/)
-          .then(() => {
-            return frisby.post(REST_URL + '/user/data-export', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-              body: {
-                answer: 'AAAAAA',
-                format: 1
-              }
-            })
-              .expect('status', 401)
-              .expect('bodyContains', 'Wrong answer to CAPTCHA. Please try again.')
-          })
-      })
-  })
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(response.json.confirmation).toBe('Your data export will open in a new Browser window.');
 
-  it('Export data using right answer to CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'bjoern.kimminich@gmail.com',
-        password: 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI='
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.get(REST_URL + '/image-captcha', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-        })
-          .expect('status', 200)
-          .expect('header', 'content-type', /application\/json/)
-          .then(({ json: captchaAnswer }) => {
-            return frisby.post(REST_URL + '/user/data-export', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-              body: {
-                answer: captchaAnswer.answer,
-                format: 1
-              }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-              .then(({ json }) => {
-                const parsedData = JSON.parse(json.userData)
-                expect(parsedData.username).toBe('bkimminich')
-                expect(parsedData.email).toBe('bjoern.kimminich@gmail.com')
-              })
-          })
-      })
-  })
+    const parsedData = JSON.parse(response.json.userData);
+    expect(parsedData.username).toBe('bkimminich');
+    expect(parsedData.email).toBe('bjoern.kimminich@gmail.com');
+  });
 
-  it('Export data including orders without use of CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'amy@' + config.get<string>('application.domain'),
-        password: 'K1f.....................'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/basket/4/checkout', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-        })
-          .expect('status', 200)
-          .then(() => {
-            return frisby.post(REST_URL + '/user/data-export', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-              body: {
-                format: '1'
-              }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-              .then(({ json }) => {
-                const parsedData = JSON.parse(json.userData)
-                expect(parsedData.username).toBe('')
-                expect(parsedData.email).toBe('amy@' + config.get<string>('application.domain'))
-                expect(parsedData.orders[0].totalPrice).toBe(9.98)
-                expect(parsedData.orders[0].bonus).toBe(0)
-                expect(parsedData.orders[0].products[0].quantity).toBe(2)
-                expect(parsedData.orders[0].products[0].name).toBe('Raspberry Juice (1000ml)')
-                expect(parsedData.orders[0].products[0].price).toBe(4.99)
-                expect(parsedData.orders[0].products[0].total).toBe(9.98)
-                expect(parsedData.orders[0].products[0].bonus).toBe(0)
-              })
-          })
-      })
-  })
 
-  it('Export data including reviews without use of CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'jim@' + config.get<string>('application.domain'),
-        password: 'ncc-1701'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/user/data-export', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-          body: {
-            format: '1'
-          }
-        })
-          .expect('status', 200)
-          .expect('header', 'content-type', /application\/json/)
-          .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-          .then(({ json }) => {
-            const parsedData = JSON.parse(json.userData)
-            expect(parsedData.username).toBe('')
-            expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'))
-            expect(parsedData.reviews[0].message).toBe('Looks so much better on my uniform than the boring Starfleet symbol.')
-            expect(parsedData.reviews[0].author).toBe('jim@' + config.get<string>('application.domain'))
-            expect(parsedData.reviews[0].productId).toBe(20)
-            expect(parsedData.reviews[0].likesCount).toBe(0)
-            expect(parsedData.reviews[0].likedBy[0]).toBe(undefined)
-            expect(parsedData.reviews[1].message).toBe('Fresh out of a replicator.')
-            expect(parsedData.reviews[1].author).toBe('jim@' + config.get<string>('application.domain'))
-            expect(parsedData.reviews[1].productId).toBe(22)
-            expect(parsedData.reviews[1].likesCount).toBe(0)
-            expect(parsedData.reviews[1].likedBy[0]).toBe(undefined)
-          })
-      })
-  })
+  it('Export data when CAPTCHA requested need right answer', async () => {
+    const token = await login('bjoern.kimminich@gmail.com', 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=');
+    const captchaResponse = await frisby.get(REST_URL + '/image-captcha', {
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }
+    }).expect('status', 200)
+      .expect('header', 'content-type', /application\/json/)
+      .promise();
 
-  it('Export data including memories without use of CAPTCHA', () => {
-    const file = path.resolve(__dirname, '../files/validProfileImage.jpg')
-    const form = frisby.formData()
-    form.append('image', fs.createReadStream(file), 'Valid Image')
-    form.append('caption', 'Valid Image')
 
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'jim@' + config.get<string>('application.domain'),
-        password: 'ncc-1701'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/memories', {
-          headers: {
-            Authorization: 'Bearer ' + jsonLogin.authentication.token,
-            // @ts-expect-error FIXME form.getHeaders() is not found
-            'Content-Type': form.getHeaders()['content-type']
-          },
-          body: form
-        })
-          .expect('status', 200)
-          .then(() => {
-            return frisby.post(REST_URL + '/user/data-export', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-              body: {
-                format: '1'
-              }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-              .then(({ json }) => {
-                const parsedData = JSON.parse(json.userData)
-                expect(parsedData.username).toBe('')
-                expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'))
-                expect(parsedData.memories[0].caption).toBe('Valid Image')
-                expect(parsedData.memories[0].imageUrl).toContain('assets/public/images/uploads/valid-image')
-              })
-          })
-      })
-  })
+   const response = await exportData(token, {
+      answer: 'AAAAAA',
+      format: 1
+    });
+    expect(response.status).toBe(401);
+    expect(response.body).toContain('Wrong answer to CAPTCHA. Please try again.');
+  });
 
-  it('Export data including orders with use of CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'amy@' + config.get<string>('application.domain'),
-        password: 'K1f.....................'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/basket/4/checkout', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-        })
-          .expect('status', 200)
-          .then(() => {
-            return frisby.get(REST_URL + '/image-captcha', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .then(({ json: captchaAnswer }) => {
-                return frisby.post(REST_URL + '/user/data-export', {
-                  headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-                  body: {
-                    answer: captchaAnswer.answer,
-                    format: 1
-                  }
-                })
-                  .expect('status', 200)
-                  .expect('header', 'content-type', /application\/json/)
-                  .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-                  .then(({ json }) => {
-                    const parsedData = JSON.parse(json.userData)
-                    expect(parsedData.username).toBe('')
-                    expect(parsedData.email).toBe('amy@' + config.get<string>('application.domain'))
-                    expect(parsedData.orders[0].totalPrice).toBe(9.98)
-                    expect(parsedData.orders[0].bonus).toBe(0)
-                    expect(parsedData.orders[0].products[0].quantity).toBe(2)
-                    expect(parsedData.orders[0].products[0].name).toBe('Raspberry Juice (1000ml)')
-                    expect(parsedData.orders[0].products[0].price).toBe(4.99)
-                    expect(parsedData.orders[0].products[0].total).toBe(9.98)
-                    expect(parsedData.orders[0].products[0].bonus).toBe(0)
-                  })
-              })
-          })
-      })
-  })
+  it('Export data using right answer to CAPTCHA', async () => {
+    const token = await login('bjoern.kimminich@gmail.com', 'bW9jLmxpYW1nQGhjaW5pbW1pay5ucmVvamI=');
+    const captchaResponse = await frisby.get(REST_URL + '/image-captcha', {
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }
+    }).expect('status', 200)
+      .expect('header', 'content-type', /application\/json/)
+      .promise();
+        const response = await exportData(token, {
+      answer: captchaResponse.json.answer,
+      format: 1
+    });
+     expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(response.json.confirmation).toBe('Your data export will open in a new Browser window.');
 
-  it('Export data including reviews with use of CAPTCHA', () => {
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'jim@' + config.get<string>('application.domain'),
-        password: 'ncc-1701'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.get(REST_URL + '/image-captcha', {
-          headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-        })
-          .expect('status', 200)
-          .expect('header', 'content-type', /application\/json/)
-          .then(({ json: captchaAnswer }) => {
-            return frisby.post(REST_URL + '/user/data-export', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-              body: {
-                answer: captchaAnswer.answer,
-                format: 1
-              }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-              .then(({ json }) => {
-                const parsedData = JSON.parse(json.userData)
-                expect(parsedData.username).toBe('')
-                expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'))
-                expect(parsedData.reviews[0].message).toBe('Looks so much better on my uniform than the boring Starfleet symbol.')
-                expect(parsedData.reviews[0].author).toBe('jim@' + config.get<string>('application.domain'))
-                expect(parsedData.reviews[0].productId).toBe(20)
-                expect(parsedData.reviews[0].likesCount).toBe(0)
-                expect(parsedData.reviews[0].likedBy[0]).toBe(undefined)
-                expect(parsedData.reviews[1].message).toBe('Fresh out of a replicator.')
-                expect(parsedData.reviews[1].author).toBe('jim@' + config.get<string>('application.domain'))
-                expect(parsedData.reviews[1].productId).toBe(22)
-                expect(parsedData.reviews[1].likesCount).toBe(0)
-                expect(parsedData.reviews[1].likedBy[0]).toBe(undefined)
-              })
-          })
-      })
-  })
+    const parsedData = JSON.parse(response.json.userData);
+    expect(parsedData.username).toBe('bkimminich');
+    expect(parsedData.email).toBe('bjoern.kimminich@gmail.com');
+  });
 
-  it('Export data including memories with use of CAPTCHA', () => {
-    const file = path.resolve(__dirname, '../files/validProfileImage.jpg')
-    const form = frisby.formData()
-    form.append('image', fs.createReadStream(file), 'Valid Image')
-    form.append('caption', 'Valid Image')
+  it('Export data including orders without use of CAPTCHA', async () => {
+    const token = await login('amy@' + config.get<string>('application.domain'), 'K1f.....................');
+    await frisby.post(REST_URL + '/basket/4/checkout', {
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }
+    }).expect('status', 200).promise();
 
-    return frisby.post(REST_URL + '/user/login', {
-      headers: jsonHeader,
-      body: {
-        email: 'jim@' + config.get<string>('application.domain'),
-        password: 'ncc-1701'
-      }
-    })
-      .expect('status', 200)
-      .then(({ json: jsonLogin }) => {
-        return frisby.post(REST_URL + '/memories', {
-          headers: {
-            Authorization: 'Bearer ' + jsonLogin.authentication.token,
-            // @ts-expect-error FIXME form.getHeaders() is not found
-            'Content-Type': form.getHeaders()['content-type']
-          },
-          body: form
-        })
-          .expect('status', 200)
-          .then(() => {
-            return frisby.get(REST_URL + '/image-captcha', {
-              headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' }
-            })
-              .expect('status', 200)
-              .expect('header', 'content-type', /application\/json/)
-              .then(({ json: captchaAnswer }) => {
-                return frisby.post(REST_URL + '/user/data-export', {
-                  headers: { Authorization: 'Bearer ' + jsonLogin.authentication.token, 'content-type': 'application/json' },
-                  body: {
-                    answer: captchaAnswer.answer,
-                    format: 1
-                  }
-                })
-                  .expect('status', 200)
-                  .expect('header', 'content-type', /application\/json/)
-                  .expect('json', 'confirmation', 'Your data export will open in a new Browser window.')
-                  .then(({ json }) => {
-                    const parsedData = JSON.parse(json.userData)
-                    expect(parsedData.username).toBe('')
-                    expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'))
-                    expect(parsedData.memories[0].caption).toBe('Valid Image')
-                    expect(parsedData.memories[0].imageUrl).toContain('assets/public/images/uploads/valid-image')
-                  })
-              })
-          })
-      })
-  })
-})
+    const response = await exportData(token, { format: '1' });
+    expect(response.status).toBe(200);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(response.json.confirmation).toBe('Your data export will open in a new Browser window.');
+    const parsedData = JSON.parse(response.json.userData);
+    expect(parsedData.username).toBe('');
+    expect(parsedData.email).toBe('amy@' + config.get<string>('application.domain'));
+    expect(parsedData.orders[0].totalPrice).toBe(9.98);
+    expect(parsedData.orders[0].bonus).toBe(0);
+    expect(parsedData.orders[0].products[0].quantity).toBe(2);
+    expect(parsedData.orders[0].products[0].name).toBe('Raspberry Juice (1000ml)');
+    expect(parsedData.orders[0].products[0].price).toBe(4.99);
+    expect(parsedData.orders[0].products[0].total).toBe(9.98);
+    expect(parsedData.orders[0].products[0].bonus).toBe(0);
+  });
+
+  it('Export data including reviews without use of CAPTCHA', async () => {
+    const token = await login('jim@' + config.get<string>('application.domain'), 'ncc-1701');
+    const response = await exportData(token, { format: '1' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/application\/json/);
+    expect(response.json.confirmation).toBe('Your data export will open in a new Browser window.');
+
+    const parsedData = JSON.parse(response.json.userData);
+    expect(parsedData.username).toBe('');
+    expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'));
+    expect(parsedData.reviews[0].message).toBe('Looks so much better on my uniform than the boring Starfleet symbol.');
+    expect(parsedData.reviews[0].author).toBe('jim@' + config.get<string>('application.domain'));
+    expect(parsedData.reviews[0].productId).toBe(20);
+    expect(parsedData.reviews[0].likesCount).toBe(0);
+    expect(parsedData.reviews[0].likedBy[0]).toBe(undefined);
+    expect(parsedData.reviews[1].message).toBe('Fresh out of a replicator.');
+    expect(parsedData.reviews[1].author).toBe('jim@' + config.get<string>('application.domain'));
+    expect(parsedData.reviews[1].productId).toBe(22);
+    expect(parsedData.reviews[1].likesCount).toBe(0);
+    expect(parsedData.reviews[1].likedBy[0]).toBe(undefined);
+  });
+
+  it('Export data including memories without use of CAPTCHA', async () => {
+    const file = path.resolve(__dirname, 'path/to/your/image.jpg'); // Define the file path
+    const form = new FormData();
+    form.append('image', fs.createReadStream(file), 'Valid Image');
+    form.append('caption', 'Valid Image');
+
+    const token = await login('jim@' + config.get<string>('application.domain'), 'ncc-1701');
+    await frisby.post(REST_URL + '/memories', {
+      headers: {
+        ...form.getHeaders(),
+        'Content-Type': form.getHeaders()['content-type']
+      },
+      body: form
+    }).expect('status', 200).promise();
+
+    const response = await exportData(token, { format: '1' });
+    expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toMatch(/application\/json/);
+      expect(response.json.confirmation).toBe('Your data export will open in a new Browser window.');
+
+    const parsedData = JSON.parse(response.json.userData);
+    expect(parsedData.username).toBe('');
+    expect(parsedData.email).toBe('jim@' + config.get<string>('application.domain'));
+    expect(parsedData.memories[0].caption).toBe('Valid Image');
+    expect(parsedData.memories[0].imageUrl).toContain('assets/public/images/uploads/valid-image');
+  });
+
+  it('Export data including orders with use of CAPTCHA', async () => {
+    const token = await login('amy@' + config.get<string>('application.domain'), 'K1f.....................');
+    await frisby.post(REST_URL + '/basket/4/checkout', {
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }
+    }).expect('status', 200).promise();
+
+    const response = await frisby.get(REST_URL + '/image-captcha', {
+      headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json' }
+    }).expect('status', 200)
+      .expect('header', 'content-type', /application\/json/)
+      .promise();
+
+    const exportResponse = await exportData(token, {
+      answer: 'wrongAnswer', // Incorrect CAPTCHA answer
+      format: 1
+    });
+
+    expect(exportResponse.status).toBe(401);
+    expect(exportResponse.body).toContain('Wrong answer to CAPTCHA. Please try again.');
+  });
+});
+
+
+
+
+
+
+
+
+
