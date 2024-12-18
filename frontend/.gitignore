@@ -1,21 +1,20 @@
 # See http://help.github.com/ignore-files/ for more about ignoring files.
 
-# compiled output
+# Compiled output
 /dist
 /tmp
 /out-tsc
 
-# dependencies
+# Dependencies
 /node_modules
-package-lock.json
 
 # IDEs and editors
-/.idea
-.project
-.classpath
+/.idea/
+/.project
+/.classpath
+/.settings/
+/*.launch
 .c9/
-*.launch
-.settings/
 *.sublime-workspace
 
 # IDE - VSCode
@@ -25,17 +24,30 @@ package-lock.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# misc
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Angular & Sass cache
 /.angular/cache
 /.sass-cache
-/connect.lock
+
+# Coverage & testing
 /coverage
-/libpeerconnection.log
+/testem.log
+
+# Logs and lock files
 npm-debug.log
 yarn-error.log
-testem.log
-/typings
+/libpeerconnection.log
+/connect.lock
 
 # System Files
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Misc
+/typings
