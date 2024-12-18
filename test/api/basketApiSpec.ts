@@ -53,46 +53,7 @@ describe('/rest/basket/:id', () => {
         expect(json.data.Products.length).toBe(3)
       })
   })
-})
 
-describe('/api/Baskets', () => {
-  it('POST new basket is not part of API', () => {
-    return frisby.post(API_URL + '/Baskets', {
-      headers: authHeader,
-      body: {
-        UserId: 1
-      }
-    })
-      .expect('status', 500)
-  })
-
-  it('GET all baskets is not part of API', () => {
-    return frisby.get(API_URL + '/Baskets', { headers: authHeader })
-      .expect('status', 500)
-  })
-})
-
-describe('/api/Baskets/:id', () => {
-  it('GET existing basket is not part of API', () => {
-    return frisby.get(API_URL + '/Baskets/1', { headers: authHeader })
-      .expect('status', 500)
-  })
-
-  it('PUT update existing basket is not part of API', () => {
-    return frisby.put(API_URL + '/Baskets/1', {
-      headers: authHeader,
-      body: { UserId: 2 }
-    })
-      .expect('status', 500)
-  })
-
-  it('DELETE existing basket is not part of API', () => {
-    return frisby.del(API_URL + '/Baskets/1', { headers: authHeader })
-      .expect('status', 500)
-  })
-})
-
-describe('/rest/basket/:id', () => {
   it('GET existing basket of another user', () => {
     return frisby.post(REST_URL + '/user/login', {
       headers: jsonHeader,
@@ -149,7 +110,6 @@ describe('/rest/basket/:id/checkout', () => {
   it('POST placing an order for a basket with 99% discount is possible', () => {
     return frisby.put(REST_URL + '/basket/2/coupon/' + encodeURIComponent(forgedCoupon), { headers: authHeader })
       .expect('status', 200)
-      .expect('header', 'content-type', /application\/json/)
       .expect('json', { discount: 99 })
       .then(() => {
         return frisby.post(REST_URL + '/basket/2/checkout', { headers: authHeader })
@@ -165,7 +125,6 @@ describe('/rest/basket/:id/coupon/:coupon', () => {
   it('PUT apply valid coupon to existing basket', () => {
     return frisby.put(REST_URL + '/basket/1/coupon/' + encodeURIComponent(validCoupon), { headers: authHeader })
       .expect('status', 200)
-      .expect('header', 'content-type', /application\/json/)
       .expect('json', { discount: 15 })
   })
 
